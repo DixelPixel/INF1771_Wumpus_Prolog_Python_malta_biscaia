@@ -18,6 +18,8 @@ delete([Elem|Tail], Del, Result) :-
 	
 
 
+:- discontiguous reset_game/0.
+
 reset_game :- retractall(memory(_,_,_)), 
 			retractall(visitado(_,_)), 
 			retractall(certeza(_,_)),
@@ -76,25 +78,33 @@ andar :- posicao(X,Y,P), P = norte, map_size(_,MAX_Y), Y < MAX_Y, YY is Y + 1,
          retract(posicao(X,Y,_)), assert(posicao(X, YY, P)), 
 		 %((retract(certeza(X,YY)), assert(certeza(X,YY))); assert(certeza(X,YY))),
 		 set_real(X,YY),
-		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
+		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),
+         ((retract(visitado(X,YY)), assert(visitado(X,YY))); assert(visitado(X,YY))),
+         atualiza_pontuacao(-1),!.
 		 
 andar :- posicao(X,Y,P), P = sul,  Y > 1, YY is Y - 1, 
          retract(posicao(X,Y,_)), assert(posicao(X, YY, P)), 
 		 %((retract(certeza(X,YY)), assert(certeza(X,YY))); assert(certeza(X,YY))),
 		 set_real(X,YY),
-		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
+		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),
+         ((retract(visitado(X,YY)), assert(visitado(X,YY))); assert(visitado(X,YY))),
+         atualiza_pontuacao(-1),!.
 
 andar :- posicao(X,Y,P), P = leste, map_size(MAX_X,_), X < MAX_X, XX is X + 1, 
          retract(posicao(X,Y,_)), assert(posicao(XX, Y, P)), 
 		 %((retract(certeza(XX,Y)), assert(certeza(XX,Y))); assert(certeza(XX,Y))),
 		 set_real(XX,Y),
-		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
+		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),
+         ((retract(visitado(XX,Y)), assert(visitado(XX,Y))); assert(visitado(XX,Y))),
+         atualiza_pontuacao(-1),!.
 
 andar :- posicao(X,Y,P), P = oeste,  X > 1, XX is X - 1, 
          retract(posicao(X,Y,_)), assert(posicao(XX, Y, P)), 
 		 %((retract(certeza(XX,Y)), assert(certeza(XX,Y))); assert(certeza(XX,Y))),
 		 set_real(XX,Y),
-		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
+		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),
+         ((retract(visitado(XX,Y)), assert(visitado(XX,Y))); assert(visitado(XX,Y))),
+         atualiza_pontuacao(-1),!.
 		 
 %pegar	
 pegar :- posicao(X,Y,_), tile(X,Y,'O'), retract(tile(X,Y,'O')), assert(tile(X,Y,'')), atualiza_pontuacao(-5), atualiza_pontuacao(500),set_real(X,Y),!. 
@@ -243,13 +253,147 @@ show_mem(_,0) :- energia(E), pontuacao(P), write('E: '), write(E), write('   P: 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %apagar esta linha - apenas para demonstracao aleatoria
-executa_acao(X) :- L=['virar_esquerda','virar_direita','andar','pegar'],random_between(1,4,I), nth1(I, L, X),!.
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% %% Lógica do Agente Inteligente
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%apagar linhas abaixo... sao exemplos de resposta
-%executa_acao(andar) :- posicao(PX, _, oeste), PX > 1, X = andar,!.
-%executa_acao(andar) :- posicao(PX, _, leste), PX < 3, X = andar,!.
-%executa_acao(pegar) :- posicao(PX, PY,_), tem_ouro(PX, PY), !.
-%executa_acao(voltar) :- peguei_todos_ouros,!.
+% Verifica se uma célula é segura
+% Uma célula é segura se temos certeza sobre ela E não tem perigos (Brisa, Passos, Palmas/Flash)
+% Ou se já visitamos ela (então sabemos que é segura)
+eh_seguro(X, Y) :- visitado(X,Y), !.
+eh_seguro(X, Y) :- certeza(X,Y), memory(X,Y, Conteudo),
+                   \+ member(brisa, Conteudo),
+                   \+ member(passos, Conteudo),
+                   \+ member(palmas, Conteudo).
+
+% Verifica se uma célula é um objetivo de exploração (segura e não visitada)
+objetivo_explorar(X, Y) :- map_size(MX, MY),
+                           between(1, MX, X), between(1, MY, Y),
+                           \+ visitado(X,Y),
+                           eh_seguro(X,Y).
+
+% Distância de Manhattan
+distancia_manhattan(X1, Y1, X2, Y2, D) :- D is abs(X1 - X2) + abs(Y1 - Y2).
+
+:- discontiguous pegar/0.
+:- discontiguous proximo_objetivo/3.
+
+% Encontra a célula segura não visitada mais próxima
+melhor_exploracao(TargetX, TargetY) :-
+    posicao(CurX, CurY, _),
+    findall(D-(X,Y), (objetivo_explorar(X,Y), distancia_manhattan(CurX, CurY, X, Y, D)), Candidates),
+    keysort(Candidates, [_-(TargetX, TargetY)|_]).
+
+% PREDICADOS DE RISCO (usados por proximo_objetivo)
+
+% Nível 1: Célula sem nenhuma informação (melhor risco - território desconhecido)
+risco_sem_informacao(X, Y) :-
+    map_size(MX, MY),
+    between(1, MX, X), 
+    between(1, MY, Y),
+    \+ visitado(X,Y),
+    \+ certeza(X,Y),
+    \+ memory(X,Y,_).  % CRÍTICO: Também não deve ter NENHUMA informação na memória!
+
+% Nível 2: Célula com apenas risco de monstro (dano, mas sobrevivível)
+risco_monstro(X, Y) :-
+    map_size(MX, MY),
+    between(1, MX, X), 
+    between(1, MY, Y),
+    \+ visitado(X,Y),
+    memory(X,Y,M),           % TEM que ter memory
+    member(passos, M),       % Tem previsão de monstro
+    \+ member(brisa, M),     % MAS não tem previsão de buraco
+    \+ member(palmas, M).    % MAS não tem previsão de teleportador
+
+% Nível 3: Célula com risco de teleportador (aleatório)
+risco_teleportador(X, Y) :-
+    map_size(MX, MY),
+    between(1, MX, X), 
+    between(1, MY, Y),
+    \+ visitado(X,Y),
+    memory(X,Y,M),           % TEM que ter memory
+    member(palmas, M),       % Tem previsão de teleportador
+    \+ member(brisa, M).     % MAS não tem previsão de buraco
+
+% Nível 4: Célula com risco de buraco (morte instantânea - ÚLTIMO RECURSO)
+risco_buraco(X, Y) :-
+    map_size(MX, MY),
+    between(1, MX, X), 
+    between(1, MY, Y),
+    \+ visitado(X,Y),
+    memory(X,Y,M),           % TEM que ter memory
+    member(brisa, M).        % Tem previsão de buraco
+
+% OBJETIVOS DO AGENTE (em ordem de prioridade)
+
+% Exploração: Ir para a célula segura não visitada mais próxima
+proximo_objetivo(X, Y, ir_para) :- melhor_exploracao(X, Y), !.
+
+% NOVO: PRIORIDADE 2 - Explorar células SEM INFORMAÇÃO (melhor que riscos conhecidos!)
+proximo_objetivo(X, Y, ir_para) :-
+    posicao(CurX, CurY, _),
+    findall(D-(XX,YY), (risco_sem_informacao(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
+    Candidates \= [],
+    keysort(Candidates, [_-(X, Y)|_]), !.
+
+% PRIORIDADE 3 - Arriscar com monstros (dano, mas sobrevivível)
+proximo_objetivo(X, Y, ir_para) :-
+    write('[PROLOG-DEBUG] Tentando achar monstros...'), nl,
+    posicao(CurX, CurY, _),
+    findall(D-(XX,YY), (risco_monstro(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
+    length(Candidates, NM),
+    format('[PROLOG-DEBUG] Monstros disponíveis: ~w~n', [NM]),
+    Candidates \= [],
+    keysort(Candidates, [_-(X, Y)|_]), 
+    write('[PROLOG-RISK] Escolheu MONSTRO!'), nl, !.
+
+% PRIORIDADE 4 - Arriscar com teleportador (aleatório)
+proximo_objetivo(X, Y, ir_para) :-
+    write('[PROLOG-DEBUG] Tentando achar teleportadores...'), nl,
+    posicao(CurX, CurY, _),
+    findall(D-(XX,YY), (risco_teleportador(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
+    length(Candidates, NT),
+    format('[PROLOG-DEBUG] Teleportadores disponíveis: ~w~n', [NT]),
+    Candidates \= [],
+    keysort(Candidates, [_-(X, Y)|_]), 
+    write('[PROLOG-RISK] Escolheu TELEPORTADOR!'), nl, !.
+
+% PRIORIDADE 5 - ÚLTIMO RECURSO: Arriscar com buraco (morte instantânea)
+proximo_objetivo(X, Y, ir_para) :-
+    write('[PROLOG-DEBUG] ÚLTIMO RECURSO - tentando achar buracos...'), nl,
+    posicao(CurX, CurY, _),
+    findall(D-(XX,YY), (risco_buraco(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
+    length(Candidates, NB),
+    format('[PROLOG-DEBUG] Buracos disponíveis: ~w~n', [NB]),
+    Candidates \= [],
+    keysort(Candidates, [_-(X, Y)|_]), 
+    write('[PROLOG-RISK] Escolheu BURACO (último recurso)!'), nl, !.
+
+% Se não há células seguras para explorar e não pegamos tudo...
+% Se estivermos em (1,1), saímos.
+proximo_objetivo(1, 1, sair) :- posicao(1,1,_), !.
+% Se não estivermos em (1,1), voltamos para lá.
+proximo_objetivo(1, 1, ir_para) :- !.
+
+% Interface para o Python chamar e receber a ação imediata ou o alvo
+% O Python vai chamar executa_acao(Acao)? Não, mudamos para proximo_objetivo.
+% Mas para manter compatibilidade mínima ou facilitar, vamos manter um wrapper se precisar.
+% O Python vai chamar `proximo_objetivo(X,Y,Tipo)`.
+
+% Reset game deve resetar ouros
+reset_game :- retractall(memory(_,_,_)), 
+			retractall(visitado(_,_)), 
+			retractall(certeza(_,_)),
+			retractall(energia(_)),
+			retractall(pontuacao(_)),
+			retractall(posicao(_,_,_)),
+            retractall(ouros_coletados(_)),
+			assert(energia(100)),
+			assert(pontuacao(0)),
+			assert(posicao(1,1, norte)),
+            assert(visitado(1,1)),
+            assert(ouros_coletados(0)).
 
 
 

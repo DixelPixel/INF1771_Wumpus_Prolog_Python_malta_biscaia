@@ -1,14 +1,15 @@
 ################################################
 import pygame
-import sys, time, random
+import sys, time, random, heapq
 from pyswip import Prolog, Functor, Variable, Query
+from TreeNode import TreeNode
 
 import pathlib
 current_path = str(pathlib.Path().resolve())
 
 elapsed_time = 0
 auto_play_tempo = 0.5
-auto_play = False # desligar para controlar manualmente
+auto_play = True # desligar para controlar manualmente
 show_map = False
 
 scale = 60
@@ -44,15 +45,171 @@ prolog.consult(pl_file)
 
 last_action = ""
 
-def decisao():
+action_queue = []
 
-    acao = ""    
+def heuristic(a, b):
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+def get_neighbors(pos):
+    x, y = pos
+    neighbors = []
+    # Check boundaries (1 to 12)
+    if x > 1: neighbors.append((x-1, y))
+    if x < 12: neighbors.append((x+1, y))
+    if y > 1: neighbors.append((x, y-1))
+    if y < 12: neighbors.append((x, y+1))
+    return neighbors
+
+def a_star(start, goal):
+    # start is (x, y, direction)
+    # goal is (x, y)
+    # Returns list of actions
     
-    acoes = list(prolog.query("executa_acao(X)"))
-    if len(acoes) > 0:
-        acao = acoes[0]['X']
+    start_node = TreeNode(start, 0, 0)
+    open_set = []
+    heapq.heappush(open_set, start_node)
+    visited = set()
+    
+    # Map to store best node for each coordinate/direction to reconstruct path
+    came_from = {}
+    
+    while open_set:
+        current = heapq.heappop(open_set)
+        curr_pos = current.get_coord() # (x, y, dir)
+        
+        if (curr_pos[0], curr_pos[1]) == goal:
+            # Reconstruct path
+            path = []
+            while current.get_parent():
+                # Determine action from parent to current
+                parent_pos = current.get_parent().get_coord()
+                # Logic to determine action... wait, A* usually returns nodes. 
+                # We need actions. Let's store action in the node or deduce it.
+                # Actually, let's deduce it.
+                # But simpler: The transitions define the actions.
+                # Let's store the action taken to reach this node in the node itself?
+                # TreeNode doesn't have action field. We can subclass or just use a wrapper.
+                # Or just deduce:
+                # If pos changed, it was 'andar'.
+                # If dir changed, it was 'virar_...'.
+                path.append(current)
+                current = current.get_parent()
+            path.reverse()
+            
+            actions = []
+            # We need to extract actions from the path of states
+            # path[0] is the first step AFTER start.
+            prev = start
+            for node in path:
+                curr = node.get_coord()
+                if curr[0] != prev[0] or curr[1] != prev[1]:
+                    actions.append('andar')
+                elif curr[2] != prev[2]:
+                    # Rotation
+                    dirs = ['norte', 'leste', 'sul', 'oeste']
+                    idx_prev = dirs.index(prev[2])
+                    idx_curr = dirs.index(curr[2])
+                    diff = (idx_curr - idx_prev) % 4
+                    if diff == 1: actions.append('virar_direita')
+                    elif diff == 3: actions.append('virar_esquerda')
+                    # 180 turn is 2 turns, but our neighbors logic should handle single turns
+                prev = curr
+            return actions
 
-    return acao
+        if (curr_pos[0], curr_pos[1], curr_pos[2]) in visited:
+            continue
+        visited.add((curr_pos[0], curr_pos[1], curr_pos[2]))
+        
+        # Generate successors (Actions: Andar, Virar Esquerda, Virar Direita)
+        # 1. Andar
+        x, y, d = curr_pos
+        nx, ny = x, y
+        if d == 'norte': ny += 1
+        elif d == 'sul': ny -= 1
+        elif d == 'leste': nx += 1
+        elif d == 'oeste': nx -= 1
+        
+        # Check if move is valid (in bounds)
+        if 1 <= nx <= 12 and 1 <= ny <= 12:
+             # Cost of move is 1
+             new_g = current.get_value_gx() + 1
+             new_h = heuristic((nx, ny), goal)
+             new_node = TreeNode((nx, ny, d), new_g + new_h, new_g)
+             new_node.set_parent(current)
+             heapq.heappush(open_set, new_node)
+
+        # 2. Virar Direita
+        dirs = ['norte', 'leste', 'sul', 'oeste']
+        idx = dirs.index(d)
+        new_d = dirs[(idx + 1) % 4]
+        new_node = TreeNode((x, y, new_d), current.get_value_gx() + 1 + heuristic((x,y), goal), current.get_value_gx() + 1)
+        new_node.set_parent(current)
+        heapq.heappush(open_set, new_node)
+
+        # 3. Virar Esquerda
+        new_d = dirs[(idx - 1) % 4]
+        new_node = TreeNode((x, y, new_d), current.get_value_gx() + 1 + heuristic((x,y), goal), current.get_value_gx() + 1)
+        new_node.set_parent(current)
+        heapq.heappush(open_set, new_node)
+        
+    return [] # No path found
+
+def decisao():
+    global action_queue, last_action
+    
+    if action_queue:
+        action = action_queue.pop(0)
+        print(f"[AÇÃO] Executando da fila: {action}")
+        return action
+
+    # Query Prolog for high-level objective
+    solucoes = list(prolog.query("proximo_objetivo(X, Y, Acao)"))
+    
+    if not solucoes:
+        print("[ERRO] Prolog não retornou soluções!")
+        return ""
+        
+    sol = solucoes[0]
+    acao_prolog = str(sol['Acao'])
+    target_x = sol['X']
+    target_y = sol['Y']
+    
+    print(f"[DECISÃO] Prolog diz: {acao_prolog} para ({target_x}, {target_y})")
+    
+    if acao_prolog == 'pegar':
+        print(f"[AÇÃO] Pegando item em ({target_x}, {target_y})")
+        return 'pegar'
+    
+    if acao_prolog == 'sair':
+        print("="*50)
+        print("[FIM] AGENTE DECIDIU SAIR. FIM DE JOGO.")
+        print("="*50)
+        global last_action, auto_play
+        last_action = "SAIU"
+        auto_play = False
+        return ""
+
+    if acao_prolog == 'ir_para':
+        # Plan path to (target_x, target_y)
+        start_pos = (player_pos[0], player_pos[1], player_pos[2])
+        goal_pos = (target_x, target_y)
+        
+        print(f"[NAVEGAÇÃO] De {start_pos} para {goal_pos}")
+        
+        if (start_pos[0], start_pos[1]) == goal_pos:
+            print("[INFO] Já está no alvo")
+            return ""
+            
+        actions = a_star(start_pos, goal_pos)
+        if actions:
+            print(f"[A*] Caminho encontrado: {actions}")
+            action_queue.extend(actions)
+            return action_queue.pop(0)
+        else:
+            print("[ERRO] A* não encontrou caminho!")
+            return "virar_direita"
+
+    return ""
 
 
 def exec_prolog(a):
