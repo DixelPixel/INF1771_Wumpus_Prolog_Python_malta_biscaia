@@ -114,6 +114,14 @@ def a_star(start, goal):
                     elif diff == 3: actions.append('virar_esquerda')
                     # 180 turn is 2 turns, but our neighbors logic should handle single turns
                 prev = curr
+            
+            # Log do custo total do caminho
+            total_cost = path[-1].get_value_gx() if path else 0
+            if total_cost > 100:
+                print(f"[A*] ⚠️  ATENÇÃO: Caminho com RISCO! Custo total: {total_cost}")
+                if total_cost > 1000:
+                    print(f"[A*] 🔴 CAMINHO PASSA POR BURACO! Chance de morte!")
+            
             return actions
 
         if (curr_pos[0], curr_pos[1], curr_pos[2]) in visited:
@@ -131,8 +139,33 @@ def a_star(start, goal):
         
         # Check if move is valid (in bounds)
         if 1 <= nx <= 12 and 1 <= ny <= 12:
-             # Cost of move is 1
-             new_g = current.get_value_gx() + 1
+             # Base cost of move
+             move_cost = 1
+             
+             # Consulta Prolog para verificar riscos da célula (nx, ny)
+             # Penaliza células perigosas para que A* evite elas
+             try:
+                 # Verifica se célula já foi visitada (segura)
+                 is_visited = list(prolog.query(f"visitado({nx},{ny})"))
+                 
+                 if not is_visited:
+                     # Verifica memory para perigos
+                     memory_query = list(prolog.query(f"memory({nx},{ny},M)"))
+                     
+                     if memory_query:
+                         dangers = memory_query[0]['M']
+                         
+                         # PENALIDADES POR TIPO DE RISCO
+                         if 'brisa' in dangers:
+                             move_cost += 1000  # BURACO = morte, evita a todo custo!
+                         elif 'passos' in dangers:
+                             move_cost += 30    # Monstro = dano, penaliza mas aceita se necessário
+                         elif 'palmas' in dangers or 'flash' in dangers:
+                             move_cost += 50    # Teleportador = incerteza, penaliza moderado
+             except:
+                 pass  # Se consulta falhar, usa custo base
+             
+             new_g = current.get_value_gx() + move_cost
              new_h = heuristic((nx, ny), goal)
              new_node = TreeNode((nx, ny, d), new_g + new_h, new_g)
              new_node.set_parent(current)
@@ -206,7 +239,7 @@ def decisao():
             action_queue.extend(actions)
             return action_queue.pop(0)
         else:
-            print("[ERRO] A* não encontrou caminho!")
+            print(f"[ERRO] A* não encontrou caminho para ({target_x}, {target_y})!")
             return "virar_direita"
 
     return ""
