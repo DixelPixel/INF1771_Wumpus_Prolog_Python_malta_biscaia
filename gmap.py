@@ -9,7 +9,7 @@ current_path = str(pathlib.Path().resolve())
 
 elapsed_time = 0
 auto_play_tempo = 0.5
-auto_play = True # desligar para controlar manualmente
+auto_play = True  # desligar para controlar manualmente
 show_map = False
 
 scale = 60
@@ -122,7 +122,7 @@ def a_star(start, goal):
                 if total_cost > 1000:
                     print(f"[A*] 🔴 CAMINHO PASSA POR BURACO! Chance de morte!")
             
-            return actions
+            return (actions, total_cost)  # Retorna tupla com ações E custo
 
         if (curr_pos[0], curr_pos[1], curr_pos[2]) in visited:
             continue
@@ -185,7 +185,7 @@ def a_star(start, goal):
         new_node.set_parent(current)
         heapq.heappush(open_set, new_node)
         
-    return [] # No path found
+    return ([], 0)  # No path found - retorna tupla vazia
 
 def decisao():
     global action_queue, last_action
@@ -233,13 +233,61 @@ def decisao():
             print("[INFO] Já está no alvo")
             return ""
             
-        actions = a_star(start_pos, goal_pos)
+        result = a_star(start_pos, goal_pos)
+        actions, path_cost = result if result else ([], 0)
+        
+        # Detecta se caminho passa por BURACO (custo > 500)
+        if actions and path_cost > 500:
+            print(f"[SITUAÇÃO CRÍTICA] Caminho para ({target_x},{target_y}) passa por BURACO! Custo: {path_cost}")
+            print(f"[OVERRIDE] Escolhendo buraco ótimo: à frente > mais próximo")
+            
+            # Calcula célula à frente
+            direction = start_pos[2]
+            front_x, front_y = start_pos[0], start_pos[1]
+            if direction == 'norte': front_y += 1
+            elif direction == 'sul': front_y -= 1
+            elif direction == 'leste': front_x += 1
+            elif direction == 'oeste': front_x -= 1
+            
+            # PRIORIDADE 1: Buraco à frente (0 viradas)
+            has_pit_ahead = list(prolog.query(f"memory({front_x},{front_y},M), member(brisa, M)"))
+            if has_pit_ahead:
+                print(f"[OVERRIDE] ✅ Buraco à FRENTE em ({front_x},{front_y}) - apenas 1 ação!")
+                action_queue.clear()
+                action_queue.append('andar')
+                return action_queue.pop(0)
+            
+            # PRIORIDADE 2: Buraco mais PRÓXIMO (Manhattan)
+            print(f"[OVERRIDE] Sem buraco à frente. Buscando buraco mais próximo...")
+            pit_query = list(prolog.query(f"risco_buraco(X,Y)"))
+            
+            if pit_query:
+                current_x, current_y = start_pos[0], start_pos[1]
+                pits_with_dist = []
+                for pit in pit_query:
+                    px, py = pit['X'], pit['Y']
+                    dist = abs(current_x - px) + abs(current_y - py)
+                    pits_with_dist.append((dist, px, py))
+                
+                pits_with_dist.sort()
+                nearest_pit = pits_with_dist[0]
+                chosen_x, chosen_y = nearest_pit[1], nearest_pit[2]
+                
+                print(f"[OVERRIDE] ✅ Buraco mais próximo em ({chosen_x},{chosen_y}) - dist: {nearest_pit[0]}")
+                
+                fallback_result = a_star(start_pos, (chosen_x, chosen_y))
+                fallback_actions = fallback_result[0] if fallback_result else []
+                if fallback_actions:
+                    print(f"[A*] Caminho para buraco ótimo: {fallback_actions}")
+                    action_queue.extend(fallback_actions)
+                    return action_queue.pop(0)
+        
         if actions:
             print(f"[A*] Caminho encontrado: {actions}")
             action_queue.extend(actions)
             return action_queue.pop(0)
         else:
-            print(f"[ERRO] A* não encontrou caminho para ({target_x}, {target_y})!")
+            print(f"[ERRO] A* não encontrou nenhum caminho para ({target_x}, {target_y})!")
             return "virar_direita"
 
     return ""

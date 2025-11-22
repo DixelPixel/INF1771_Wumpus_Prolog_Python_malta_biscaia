@@ -360,15 +360,32 @@ proximo_objetivo(X, Y, ir_para) :-
     write('[PROLOG-RISK] Escolheu TELEPORTADOR!'), nl, !.
 
 % PRIORIDADE 5 - ÚLTIMO RECURSO: Arriscar com buraco (morte instantânea)
+% Prioriza buraco à FRENTE para minimizar gasto de energia
 proximo_objetivo(X, Y, ir_para) :-
     write('[PROLOG-DEBUG] ÚLTIMO RECURSO - tentando achar buracos...'), nl,
+    posicao(CurX, CurY, Dir),
+    
+    % Calcula célula à frente baseado na direção
+    (Dir = norte -> (FrontX = CurX, FrontY is CurY + 1);
+     Dir = sul -> (FrontX = CurX, FrontY is CurY - 1);
+     Dir = leste -> (FrontX is CurX + 1, FrontY = CurY);
+     Dir = oeste -> (FrontX is CurX - 1, FrontY = CurY)),
+    
+    % Verifica se célula à frente tem buraco
+    risco_buraco(FrontX, FrontY),
+    format('[PROLOG-RISK] Buraco à FRENTE em (~w,~w)! Minimizando energia (1 ação).~n', [FrontX, FrontY]),
+    X = FrontX, Y = FrontY, !.
+
+% Se não tem buraco à frente, escolhe o mais próximo  
+proximo_objetivo(X, Y, ir_para) :-
+    write('[PROLOG-DEBUG] Nenhum buraco à frente, buscando mais próximo...'), nl,
     posicao(CurX, CurY, _),
     findall(D-(XX,YY), (risco_buraco(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
     length(Candidates, NB),
     format('[PROLOG-DEBUG] Buracos disponíveis: ~w~n', [NB]),
     Candidates \= [],
     keysort(Candidates, [_-(X, Y)|_]), 
-    write('[PROLOG-RISK] Escolheu BURACO (último recurso)!'), nl, !.
+    write('[PROLOG-RISK] Escolheu BURACO mais próximo (último recurso)!'), nl, !.
 
 % Se não há células seguras para explorar e não pegamos tudo...
 % Se estivermos em (1,1), saímos.
