@@ -159,9 +159,22 @@ def a_star(start, goal):
                          if 'brisa' in dangers:
                              move_cost += 1000  # BURACO = morte, evita a todo custo!
                          elif 'passos' in dangers:
-                             move_cost += 30    # Monstro = dano, penaliza mas aceita se necessário
+                             # Monstro PREVISTO
+                             # d (minúsculo) = -20 energia, D (maiúsculo) = -50 energia
+                             # Média = ~-35 energia, custo proporcional ao dano esperado
+                             move_cost += 35
                          elif 'palmas' in dangers or 'flash' in dangers:
                              move_cost += 50    # Teleportador = incerteza, penaliza moderado
+                 else:
+                     # Célula foi VISITADA - verifica se tem monstro CONFIRMADO
+                     memory_query = list(prolog.query(f"memory({nx},{ny},M)"))
+                     if memory_query:
+                         dangers = memory_query[0]['M']
+                         if 'passos' in dangers:
+                             # MONSTRO CONFIRMADO (já passou e tomou dano)
+                             # Custo MUITO ALTO para evitar passar de novo!
+                             # O usuário pediu peso "absurdamente maior" que "talvez buraco" (1000)
+                             move_cost += 5000
              except:
                  pass  # Se consulta falhar, usa custo base
              
@@ -239,6 +252,20 @@ def decisao():
         # Detecta se caminho passa por BURACO (custo > 500)
         if actions and path_cost > 500:
             print(f"[SITUAÇÃO CRÍTICA] Caminho para ({target_x},{target_y}) passa por BURACO! Custo: {path_cost}")
+            
+            # VERIFICAÇÃO DE SEGURANÇA DO OVERRIDE:
+            # Se o próprio ALVO tem brisa, significa que o Prolog MANDOU a gente ir lá investigar.
+            # Nesse caso, NÃO devemos desviar para o buraco mais próximo (suicídio), e sim tentar chegar no alvo.
+            target_has_breeze = list(prolog.query(f"memory({target_x},{target_y},M), member(brisa, M)"))
+            
+            if target_has_breeze:
+                print(f"[OVERRIDE ABORTADO] O alvo ({target_x},{target_y}) é a fonte do risco (investigação). Seguindo plano original.")
+                print(f"[A*] Caminho encontrado: {actions}")
+                action_queue.extend(actions)
+                return action_queue.pop(0)
+            
+            # Se o alvo NÃO tem brisa, mas o caminho custa caro, é porque estamos passando por um buraco NO CAMINHO.
+            # Aí sim vale a lógica de minimizar energia se matando logo.
             print(f"[OVERRIDE] Escolhendo buraco ótimo: à frente > mais próximo")
             
             # Calcula célula à frente
@@ -259,7 +286,7 @@ def decisao():
             
             # PRIORIDADE 2: Buraco mais PRÓXIMO (Manhattan)
             print(f"[OVERRIDE] Sem buraco à frente. Buscando buraco mais próximo...")
-            pit_query = list(prolog.query(f"risco_buraco(X,Y)"))
+            pit_query = list(prolog.query(f"risco_buraco_confirmado(X,Y)"))
             
             if pit_query:
                 current_x, current_y = start_pos[0], start_pos[1]
