@@ -385,6 +385,7 @@ risco_buraco_confirmado(X, Y) :-
 % OBJETIVOS DO AGENTE (em ordem de prioridade)
 
 conhece_pocao(X, Y) :- memory(X, Y, M), member(reflexo, M).
+conhece_ouro(X, Y) :- memory(X, Y, M), member(brilho, M).
 
 % 0.5.1 - Já estou na base (1,1) com os ouros -> SAIR
 proximo_objetivo(1, 1, sair) :-
@@ -416,6 +417,14 @@ proximo_objetivo(1, 1, ir_para) :-
     ouros_coletados(N), N >= 3, posicao(X, Y, _), (X \= 1; Y \= 1),
     write('[PROLOG-ACTION] Voltando para casa!'), nl, !.
 
+% PRIORIDADE ALTA: Ir pegar ouro conhecido (descoberto mas não coletado)
+proximo_objetivo(X, Y, ir_para) :-
+    ouros_coletados(N), N < 3,
+    posicao(CurX, CurY, _),
+    findall(D-(OX,OY), (conhece_ouro(OX,OY), distancia_manhattan(CurX, CurY, OX, OY, D)), Ouros),
+    Ouros \= [], keysort(Ouros, [_-(X, Y)|_]),
+    format('[PROLOG-GOLD] Indo coletar ouro conhecido em (~w,~w)!~n', [X, Y]), !.
+
 % PRIORIDADE 1: Exploração Segura (Unknown Safe)
 proximo_objetivo(X, Y, ir_para) :- melhor_exploracao(X, Y), !.
 
@@ -441,7 +450,26 @@ proximo_objetivo(X, Y, ir_para) :-
     Candidates \= [], keysort(Candidates, [_-(X, Y)|_]), 
     write('[PROLOG-RISK] Investigando suspeita de MONSTRO.'), nl, !.
 
-% PRIORIDADE 5.5: Explorar Suspeita BURACO MAIS PROXIMO DELE
+% Define a posição à frente do agente
+frente(FX, FY) :- posicao(X, Y, norte), map_size(_, MY), Y < MY, FY is Y + 1, FX is X.
+frente(FX, FY) :- posicao(X, Y, sul), Y > 1, FY is Y - 1, FX is X.
+frente(FX, FY) :- posicao(X, Y, leste), map_size(MX, _), X < MX, FX is X + 1, FY is Y.
+frente(FX, FY) :- posicao(X, Y, oeste), X > 1, FX is X - 1, FY is Y.
+
+% PRIORIDADE 5.5: Explorar Suspeita BURACO (Prioridade: Frente > Adjacente > Mais Próximo)
+% 1. Tenta ir para frente se for suspeita
+proximo_objetivo(FX, FY, ir_para) :-
+    frente(FX, FY),
+    risco_incerto_buraco_baixo(FX, FY),
+    write('[PROLOG-RISK] Arriscando BURACO À FRENTE (Risco BAIXO).'), nl, !.
+
+% 2. Tenta ir para qualquer adjacente se for suspeita (excluindo a frente, pois já falhou)
+proximo_objetivo(AX, AY, ir_para) :-
+    adjacente(AX, AY),
+    risco_incerto_buraco_baixo(AX, AY),
+    write('[PROLOG-RISK] Arriscando BURACO ADJACENTE (Risco BAIXO).'), nl, !.
+
+% 3. Caso contrário, o mais próximo (lógica original)
 proximo_objetivo(X, Y, ir_para) :-
     posicao(CurX, CurY, _),
     findall(D-(XX,YY), (risco_incerto_buraco_baixo(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
