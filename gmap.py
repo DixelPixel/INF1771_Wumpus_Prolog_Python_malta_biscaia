@@ -8,7 +8,7 @@ import pathlib
 current_path = str(pathlib.Path().resolve())
 
 elapsed_time = 0
-auto_play_tempo = 0.5
+auto_play_tempo = 0.2
 auto_play = True  # desligar para controlar manualmente
 show_map = False
 
@@ -156,13 +156,20 @@ def a_star(start, goal):
                          dangers = memory_query[0]['M']
                          
                          # PENALIDADES POR TIPO DE RISCO
+                         # PENALIDADES POR TIPO DE RISCO
                          if 'brisa' in dangers:
-                             move_cost += 1000  # BURACO = morte, evita a todo custo!
+                             # Verifica se é BURACO CONFIRMADO
+                             is_confirmed = list(prolog.query(f"certeza({nx},{ny})"))
+                             if is_confirmed:
+                                 move_cost += 2000  # BURACO CONFIRMADO = morte certa
+                             else:
+                                 move_cost += 100   # SUSPEITA DE BURACO = risco, mas passável
+                                 
                          elif 'passos' in dangers:
-                             # Monstro PREVISTO
-                             # d (minúsculo) = -20 energia, D (maiúsculo) = -50 energia
-                             # Média = ~-35 energia, custo proporcional ao dano esperado
-                             move_cost += 35
+                             # MONSTRO CONFIRMADO (já passou e tomou dano)
+                             # Custo MUITO ALTO para evitar passar de novo!
+                             # O usuário pediu peso "absurdamente maior" que "talvez buraco" (1000)
+                             move_cost += 5000
                          elif 'palmas' in dangers or 'flash' in dangers:
                              move_cost += 50    # Teleportador = incerteza, penaliza moderado
                  else:
@@ -172,8 +179,6 @@ def a_star(start, goal):
                          dangers = memory_query[0]['M']
                          if 'passos' in dangers:
                              # MONSTRO CONFIRMADO (já passou e tomou dano)
-                             # Custo MUITO ALTO para evitar passar de novo!
-                             # O usuário pediu peso "absurdamente maior" que "talvez buraco" (1000)
                              move_cost += 5000
              except:
                  pass  # Se consulta falhar, usa custo base
@@ -248,66 +253,6 @@ def decisao():
             
         result = a_star(start_pos, goal_pos)
         actions, path_cost = result if result else ([], 0)
-        
-        # Detecta se caminho passa por BURACO (custo > 500)
-        if actions and path_cost > 500:
-            print(f"[SITUAÇÃO CRÍTICA] Caminho para ({target_x},{target_y}) passa por BURACO! Custo: {path_cost}")
-            
-            # VERIFICAÇÃO DE SEGURANÇA DO OVERRIDE:
-            # Se o próprio ALVO tem brisa, significa que o Prolog MANDOU a gente ir lá investigar.
-            # Nesse caso, NÃO devemos desviar para o buraco mais próximo (suicídio), e sim tentar chegar no alvo.
-            target_has_breeze = list(prolog.query(f"memory({target_x},{target_y},M), member(brisa, M)"))
-            
-            if target_has_breeze:
-                print(f"[OVERRIDE ABORTADO] O alvo ({target_x},{target_y}) é a fonte do risco (investigação). Seguindo plano original.")
-                print(f"[A*] Caminho encontrado: {actions}")
-                action_queue.extend(actions)
-                return action_queue.pop(0)
-            
-            # Se o alvo NÃO tem brisa, mas o caminho custa caro, é porque estamos passando por um buraco NO CAMINHO.
-            # Aí sim vale a lógica de minimizar energia se matando logo.
-            print(f"[OVERRIDE] Escolhendo buraco ótimo: à frente > mais próximo")
-            
-            # Calcula célula à frente
-            direction = start_pos[2]
-            front_x, front_y = start_pos[0], start_pos[1]
-            if direction == 'norte': front_y += 1
-            elif direction == 'sul': front_y -= 1
-            elif direction == 'leste': front_x += 1
-            elif direction == 'oeste': front_x -= 1
-            
-            # PRIORIDADE 1: Buraco à frente (0 viradas)
-            has_pit_ahead = list(prolog.query(f"memory({front_x},{front_y},M), member(brisa, M)"))
-            if has_pit_ahead:
-                print(f"[OVERRIDE] ✅ Buraco à FRENTE em ({front_x},{front_y}) - apenas 1 ação!")
-                action_queue.clear()
-                action_queue.append('andar')
-                return action_queue.pop(0)
-            
-            # PRIORIDADE 2: Buraco mais PRÓXIMO (Manhattan)
-            print(f"[OVERRIDE] Sem buraco à frente. Buscando buraco mais próximo...")
-            pit_query = list(prolog.query(f"risco_buraco_confirmado(X,Y)"))
-            
-            if pit_query:
-                current_x, current_y = start_pos[0], start_pos[1]
-                pits_with_dist = []
-                for pit in pit_query:
-                    px, py = pit['X'], pit['Y']
-                    dist = abs(current_x - px) + abs(current_y - py)
-                    pits_with_dist.append((dist, px, py))
-                
-                pits_with_dist.sort()
-                nearest_pit = pits_with_dist[0]
-                chosen_x, chosen_y = nearest_pit[1], nearest_pit[2]
-                
-                print(f"[OVERRIDE] ✅ Buraco mais próximo em ({chosen_x},{chosen_y}) - dist: {nearest_pit[0]}")
-                
-                fallback_result = a_star(start_pos, (chosen_x, chosen_y))
-                fallback_actions = fallback_result[0] if fallback_result else []
-                if fallback_actions:
-                    print(f"[A*] Caminho para buraco ótimo: {fallback_actions}")
-                    action_queue.extend(fallback_actions)
-                    return action_queue.pop(0)
         
         if actions:
             print(f"[A*] Caminho encontrado: {actions}")
@@ -526,8 +471,20 @@ def update(dt, screen):
     if (elapsed_time / 1000) > auto_play_tempo:
         
         if auto_play and player_pos[2] != 'morto':
-            exec_prolog(decisao())
+            # Capture pos before move
+            prev_x, prev_y = player_pos[0], player_pos[1]
+            
+            action = decisao()
+            exec_prolog(action)
             update_prolog()
+            
+            # Check for teleport
+            curr_x, curr_y = player_pos[0], player_pos[1]
+            dist = abs(curr_x - prev_x) + abs(curr_y - prev_y)
+            
+            if action == 'andar' and dist > 1:
+                 print(f"[TELEPORT DETECTED] Jumped from ({prev_x},{prev_y}) to ({curr_x},{curr_y}). Recalculating route...")
+                 action_queue.clear()
        
         elapsed_time = 0
         

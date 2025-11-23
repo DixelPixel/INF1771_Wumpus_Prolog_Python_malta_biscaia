@@ -7,7 +7,7 @@
 :-dynamic pontuacao/1.
 :-dynamic ouros_coletados/1.
 
-:-consult('mapa-dificil.pl').
+:-consult('mapa.pl').
 
 delete([], _, []).
 delete([Elem|Tail], Del, Result) :-
@@ -416,58 +416,65 @@ proximo_objetivo(1, 1, ir_para) :-
     ouros_coletados(N), N >= 3, posicao(X, Y, _), (X \= 1; Y \= 1),
     write('[PROLOG-ACTION] Voltando para casa!'), nl, !.
 
-% 1. Exploração Segura
+% PRIORIDADE 1: Exploração Segura (Unknown Safe)
 proximo_objetivo(X, Y, ir_para) :- melhor_exploracao(X, Y), !.
 
-% 2. Explorar SEM INFORMAÇÃO
+% PRIORIDADE 2: Sobrevivência (Buscar Poção se vida baixa < 80)
 proximo_objetivo(X, Y, ir_para) :-
+    energia(E), E < 80,
     posicao(CurX, CurY, _),
-    findall(D-(XX,YY), (risco_sem_informacao(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
-    Candidates \= [], keysort(Candidates, [_-(X, Y)|_]), 
-    write('[PROLOG-EXPLORE] Explorando desconhecido SEM informação.'), nl, !.
+    findall(D-(PX,PY), (conhece_pocao(PX,PY), distancia_manhattan(CurX, CurY, PX, PY, D)), Pots),
+    Pots \= [], keysort(Pots, [_-(X, Y)|_]),
+    format('[PROLOG-SURVIVAL] Vida baixa (~w). Buscando poção em (~w,~w).~n', [E, X, Y]), !.
 
-% 3. Explorar Suspeita TELEPORTADOR
+% PRIORIDADE 4: Explorar Suspeita TELEPORTADOR
 proximo_objetivo(X, Y, ir_para) :-
     posicao(CurX, CurY, _),
     findall(D-(XX,YY), (risco_incerto_teleport(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
     Candidates \= [], keysort(Candidates, [_-(X, Y)|_]), 
     write('[PROLOG-RISK] Investigando suspeita de TELEPORTADOR.'), nl, !.
 
-% 4. Explorar Suspeita MONSTRO
+% PRIORIDADE 5: Explorar Suspeita MONSTRO
 proximo_objetivo(X, Y, ir_para) :-
     posicao(CurX, CurY, _),
     findall(D-(XX,YY), (risco_incerto_monstro(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
     Candidates \= [], keysort(Candidates, [_-(X, Y)|_]), 
     write('[PROLOG-RISK] Investigando suspeita de MONSTRO.'), nl, !.
 
-% 5. Explorar Suspeita BURACO (BAIXO RISCO - Explicado)
+% PRIORIDADE 5.5: Explorar Suspeita BURACO MAIS PROXIMO DELE
+proximo_objetivo(X, Y, ir_para) :-
+    posicao(CurX, CurY, _),
+    findall(D-(XX,YY), (risco_incerto_buraco_baixo(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
+    Candidates \= [], keysort(Candidates, [_-(X, Y)|_]),
+    write('[PROLOG-RISK] Arriscando BURACO (Risco BAIXO - Brisa Explicada).'), nl, !.
+
+% PRIORIDADE 6: Explorar Suspeita BURACO (BAIXO RISCO - Explicado)
 proximo_objetivo(X, Y, ir_para) :-
     posicao(CurX, CurY, _),
     findall(D-(XX,YY), (risco_incerto_buraco_baixo(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
     Candidates \= [], keysort(Candidates, [_-(X, Y)|_]), 
     write('[PROLOG-RISK] Arriscando BURACO (Risco BAIXO - Brisa Explicada).'), nl, !.
 
-% 6. Explorar Suspeita BURACO (ALTO RISCO - Não Explicado)
+% PRIORIDADE 7: Explorar Suspeita BURACO (ALTO RISCO - Não Explicado)
 proximo_objetivo(X, Y, ir_para) :-
     posicao(CurX, CurY, _),
     findall(D-(XX,YY), (risco_incerto_buraco_alto(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
     Candidates \= [], keysort(Candidates, [_-(X, Y)|_]), 
     write('[PROLOG-RISK] Arriscando BURACO (Risco ALTO - Brisa NÃO Explicada).'), nl, !.
 
-% 6.5. Explorar Suspeita GENÉRICA (Qualquer incerteza restante)
+% PRIORIDADE 3: Explorar SEM INFORMAÇÃO (Unknown No Info)
+proximo_objetivo(X, Y, ir_para) :-
+    posicao(CurX, CurY, _),
+    findall(D-(XX,YY), (risco_sem_informacao(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
+    Candidates \= [], keysort(Candidates, [_-(X, Y)|_]),
+    write('[PROLOG-EXPLORE] Explorando desconhecido SEM informação.'), nl, !.
+
+% PRIORIDADE 8: Explorar Suspeita GENÉRICA (Qualquer incerteza restante)
 proximo_objetivo(X, Y, ir_para) :-
     posicao(CurX, CurY, _),
     findall(D-(XX,YY), (risco_incerto_generico(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
     Candidates \= [], keysort(Candidates, [_-(X, Y)|_]), 
     write('[PROLOG-RISK] Arriscando INCERTEZA GENÉRICA (Melhor que monstro confirmado).'), nl, !.
-
-% Sobrevivência (Poção)
-proximo_objetivo(X, Y, ir_para) :-
-    energia(E), E =< 80,
-    posicao(CurX, CurY, _),
-    findall(D-(PX,PY), (conhece_pocao(PX,PY), distancia_manhattan(CurX, CurY, PX, PY, D)), Pots),
-    Pots \= [], keysort(Pots, [_-(X, Y)|_]),
-    format('[PROLOG-SURVIVAL] Buscando poção em (~w,~w).~n', [X, Y]), !.
 
 % 7. Riscos Confirmados (Monstro > Teleport > Buraco)
 proximo_objetivo(X, Y, ir_para) :-
@@ -481,12 +488,6 @@ proximo_objetivo(X, Y, ir_para) :-
     findall(D-(XX,YY), (risco_teleportador_confirmado(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
     Candidates \= [], keysort(Candidates, [_-(X, Y)|_]), 
     write('[PROLOG-RISK] Escolheu TELEPORTADOR CONFIRMADO!'), nl, !.
-
-proximo_objetivo(X, Y, ir_para) :-
-    posicao(CurX, CurY, _),
-    findall(D-(XX,YY), (risco_buraco_confirmado(XX,YY), distancia_manhattan(CurX, CurY, XX, YY, D)), Candidates),
-    Candidates \= [], keysort(Candidates, [_-(X, Y)|_]), 
-    write('[PROLOG-RISK] Escolheu BURACO CONFIRMADO (Suicídio)!'), nl, !.
 
 % Se não há células seguras para explorar e não pegamos tudo...
 % Se estivermos em (1,1), saímos.
