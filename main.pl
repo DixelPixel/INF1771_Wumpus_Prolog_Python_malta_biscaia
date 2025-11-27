@@ -396,17 +396,17 @@ proximo_objetivo(1, 1, sair) :-
     !.
 
 proximo_objetivo(X, Y, pegar) :-
-    posicao(X, Y, _), tile(X, Y, 'O'),
+    posicao(X, Y, _), memory(X, Y, M), member(brilho, M),
     write('[PROLOG-ACTION] Ouro encontrado! Pegando.'), nl, !.
 
 proximo_objetivo(X, Y, pegar) :-
-    posicao(X, Y, _), tile(X, Y, 'U'),
+    posicao(X, Y, _), memory(X, Y, M), member(reflexo, M),
     energia(E), E =< 80,
     format('[PROLOG-ACTION] Vida crítica (~w). Bebendo poção.~n', [E]), !.
 
 % ESCAPE
 proximo_objetivo(X, Y, ir_para) :-
-    posicao(CurX, CurY, _), (tile(CurX, CurY, 'D'); tile(CurX, CurY, 'd')),
+    posicao(CurX, CurY, _), memory(CurX, CurY, MC), member(passos, MC),
     adjacente(X, Y),
     ((visitado(X, Y), memory(X, Y, M), \+ member(passos, M), \+ member(brisa, M));
      (\+ visitado(X, Y), eh_seguro(X, Y))),
